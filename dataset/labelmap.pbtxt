@@ -1,0 +1,9 @@
+item {
+    name: "light_blemish"
+    id: 1
+}
+
+item {
+    name: "dark_blemish"
+    id: 2
+}
