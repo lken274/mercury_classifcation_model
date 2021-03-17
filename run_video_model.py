@@ -5,8 +5,8 @@ import time
 
 video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sept_2020_class3_dark_blemish/*.jpg'
 window_name = 'image'
-render_scale = 0.25
-skip_frames = 100
+render_scale = 0.25 #resolution rescaling during edge detection to improve performance
+skip_frames = 100 #start at a later point in the video so we aren't waiting for fruit
 low_Hue, low_Sat, low_Val = 10, 80, 95
 high_Hue, high_Sat, high_Val = 70, 255, 255
 light_fruit_colour = (high_Hue,high_Sat,high_Val)
@@ -19,15 +19,15 @@ def main():
     #load video from file
     frames = [cv2.imread(file) for file in sorted(glob.glob(video_dir))]
     frames = frames[skip_frames:]
-    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(4,4))
+
     for roiFrame in frames:
         roi_resized = cv2.resize(roiFrame, (round(render_scale*roiFrame.shape[1]), round(render_scale*roiFrame.shape[0])))
         frame_HSV = cv2.cvtColor(roi_resized, cv2.COLOR_BGR2HSV) #convert to HSV
         frame_blur = cv2.bilateralFilter(frame_HSV, 5, 100, 100)
-        normalised_blur = cv2.cvtColor(frame_blur, cv2.COLOR_HSV2BGR)
         frame_threshold = cv2.inRange(frame_blur, dark_fruit_colour, light_fruit_colour)
         edges = cv2.Canny(frame_threshold, 200, 250)
         contours = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[-2]#find contours
+        
         fruitHulls = []
         for contour in contours:
             area = cv2.contourArea(contour, False) #get contouring area to cull bad contours
