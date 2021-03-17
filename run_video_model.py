@@ -4,11 +4,9 @@ import numpy as np
 
 video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sept_2020_class3_dark_blemish/*.jpg'
 window_name = 'image'
-skip_frames = 50
-low_Hue, low_Sat, low_Val = 10, 65, 80
+skip_frames = 100
+low_Hue, low_Sat, low_Val = 10, 75, 90
 high_Hue, high_Sat, high_Val = 70, 255, 255
-#light_fruit_colour = (60,255,230)
-#dark_fruit_colour = (10,50,70)
 light_fruit_colour = (high_Hue,high_Sat,high_Val)
 dark_fruit_colour = (low_Hue,low_Sat,low_Val)
 
@@ -18,23 +16,19 @@ minAspectRatio = 0.5
 #load video from file
 frames = [cv2.imread(file) for file in sorted(glob.glob(video_dir))]
 frames = frames[skip_frames:]
-clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(4,4))
 for roiFrame in frames:
-    #cv2.imshow(window_name, frame)
-    #cv2.waitKey()
-    frame_blur = cv2.GaussianBlur(roiFrame, (7,7), 0) #blur image
-    frame_HSV = cv2.cvtColor(frame_blur, cv2.COLOR_BGR2HSV) #convert to HSV
+    frame_HSV = cv2.cvtColor(roiFrame, cv2.COLOR_BGR2HSV) #convert to HSV
 
     h,s,v = cv2.split(frame_HSV)
     cl1 = clahe.apply(v)
-    normalised = cv2.merge((h,s,cl1))
-    
-    frame_threshold = cv2.inRange(frame_HSV, dark_fruit_colour, light_fruit_colour)
-    edges = cv2.Canny(frame_threshold, 50, 100)
-    #cv2.imshow('clahe', normalised)
-    #cv2.imshow('edge',edges)
-    #cv2.imshow('frame_threshold',frame_threshold)
-    #cv2.waitKey()
+    cl2 = clahe.apply(s)
+    normalised = cv2.merge((h,cl2,cl1))
+    normalised_bgr = cv2.cvtColor(normalised, cv2.COLOR_HSV2BGR)
+    frame_blur = cv2.bilateralFilter(normalised, 50, 50, 50)
+    normalised_blur = cv2.cvtColor(frame_blur, cv2.COLOR_HSV2BGR)
+    frame_threshold = cv2.inRange(frame_blur, dark_fruit_colour, light_fruit_colour)
+    edges = cv2.Canny(frame_threshold, 200, 250)
     contours = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[-2]#find contours
 
     fruitHulls = []
@@ -51,7 +45,7 @@ for roiFrame in frames:
             continue
         #create a sparse hull from dense fruit contour
         numPts = len(contour)
-        index, stride, offset = 0, 1, 0
+        index, stride, offset = 0, 10, 0
         numSparsePtrs = numPts/stride
         sparseHull = []
         j = 0
@@ -75,19 +69,13 @@ for roiFrame in frames:
         fruitCropHue = cv2.cvtColor(fruitCropBGR, cv2.COLOR_BGR2HSV)
         #cv2.imshow('cropped', fruitCropBGR)
 
-        blurredFruit = cv2.GaussianBlur(fruitCropHue, (19,19),0)
-        blurredFruit = cv2.cvtColor(blurredFruit, cv2.COLOR_HSV2BGR)
-        blurredFruit = cv2.cvtColor(blurredFruit, cv2.COLOR_BGR2GRAY)
-
         mask = np.zeros(fruitCropBGR.shape, dtype='uint8')
         cv2.drawContours(mask, [sparseConvexHull],-1,(255,255,255), cv2.FILLED)
         img2gray = cv2.cvtColor(mask,cv2.COLOR_BGR2GRAY)
         cv2.imshow('outlined', img2gray)
 
-        thresholded = cv2.adaptiveThreshold(blurredFruit, 255, cv2.ADAPTIVE_THRESH_MEAN_C,cv2.THRESH_BINARY_INV,73,2)
         maskedImage = cv2.bitwise_and(fruitCropBGR, fruitCropBGR, mask=img2gray)
-        
-        cv2.imshow('mask', thresholded)
+ 
         cv2.imshow(window_name, maskedImage)
         cv2.waitKey(10)
 
