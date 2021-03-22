@@ -7,6 +7,7 @@ from inferenceutils import *
 
 video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sept_2020_class3_dark_blemish/*.jpg'
 model_dir = 'inference_graph/saved_model'
+save_name = "demo_output/demo_single_1.avi"
 labelmap_path = 'dataset/labelmap.pbtxt'
 save_video = True
 
@@ -19,24 +20,23 @@ dark_fruit_colour = (low_Hue,low_Sat,low_Val)
 
 minFruitSize = 10000 * render_scale
 minAspectRatio = 0.5
-detection_threshold = 0.35
+detection_threshold = 0.5
 
 def main():
     #load video from file
     frames = [cv2.imread(file) for file in sorted(glob.glob(video_dir))]
     frames = frames[skip_frames:]
-    numFrames = len(frames-skip_frames)
+    numFrames = len(frames) - skip_frames
     size = (frames[0].shape[1], frames[0].shape[0])
-    print(size)
     category_index = label_map_util.create_category_index_from_labelmap(labelmap_path, use_display_name=True)
     model = tf.saved_model.load(model_dir)
 
     if (save_video == True):
-        out_vid = cv2.VideoWriter('demo.mp4',cv2.VideoWriter_fourcc(*'DIVX'), 10, (size))
+        out_vid = cv2.VideoWriter(save_name,cv2.VideoWriter_fourcc(*'DIVX'), 10, (size))
    
 
     for idx,roiFrame in enumerate(frames):
-        print("Frame " + str(idx) + " of " + numFrames)
+        print("Frame " + str(idx) + " of " + str(numFrames))
         tf.keras.backend.clear_session()
         roi_resized = cv2.resize(roiFrame, (round(render_scale*roiFrame.shape[1]), round(render_scale*roiFrame.shape[0])))
         frame_HSV = cv2.cvtColor(roi_resized, cv2.COLOR_BGR2HSV) #convert to HSV

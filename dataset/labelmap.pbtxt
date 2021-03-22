@@ -1,9 +1,4 @@
 item {
-    name: "light_blemish"
+    name: "blemish"
     id: 1
-}
-
-item {
-    name: "dark_blemish"
-    id: 2
 }
