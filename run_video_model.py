@@ -5,10 +5,11 @@ import time
 import tensorflow as tf
 from inferenceutils import *
 
-video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sequence_VIS_C3_blemish_01/*.jpg'
+video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sequence_NIR_C3_blemish_01/*.jpg'
 model_dir = 'inference_graph/saved_model'
-save_name = "demo_output/demo_single_specular.avi"
+save_name = "demo_output/demo_single_NIR.avi"
 labelmap_path = 'dataset/labelmap.pbtxt'
+grayscale = True
 save_video = False
 show_mask = True
 
@@ -25,6 +26,7 @@ detection_threshold = 0.5
 
 def main():
     #load video from file
+    print(sorted(glob.glob(video_dir)))
     frames = [cv2.imread(file) for file in sorted(glob.glob(video_dir))]
     frames = frames[skip_frames:]
     numFrames = len(frames) - skip_frames
@@ -39,10 +41,22 @@ def main():
     for idx,roiFrame in enumerate(frames):
         print("Frame " + str(idx) + " of " + str(numFrames))
         tf.keras.backend.clear_session()
-        roi_resized = cv2.resize(roiFrame, (round(render_scale*roiFrame.shape[1]), round(render_scale*roiFrame.shape[0])))
-        frame_HSV = cv2.cvtColor(roi_resized, cv2.COLOR_BGR2HSV) #convert to HSV
-        frame_blur = cv2.medianBlur(frame_HSV, 5) #remove noise
-        frame_threshold = cv2.inRange(frame_blur, dark_fruit_colour, light_fruit_colour)
+
+        if (grayscale == False):
+            roi_resized = cv2.resize(roiFrame, (round(render_scale*roiFrame.shape[1]), round(render_scale*roiFrame.shape[0])))
+            frame_HSV = cv2.cvtColor(roi_resized, cv2.COLOR_BGR2HSV) #convert to HSV
+            frame_blur = cv2.medianBlur(frame_HSV, 5) #remove noise
+            frame_threshold = cv2.inRange(frame_blur, dark_fruit_colour, light_fruit_colour)
+            height, width, channels = roi_resized.shape
+        else:
+            grayFrame = cv2.cvtColor(roiFrame, cv2.COLOR_BGR2GRAY)
+            roi_resized = cv2.resize(grayFrame, (round(render_scale*grayFrame.shape[1]), 
+                                                round(render_scale*grayFrame.shape[0])))
+            frame_threshold = cv2.adaptiveThreshold(roi_resized, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                                    cv2.THRESH_BINARY, 11, 2)
+            frame_threshold = cv2.bitwise_not(frame_threshold)
+            height, width = roi_resized.shape
+
         edges = cv2.Canny(frame_threshold, 150, 200)
         contours = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[-2]#find contours
 
@@ -56,7 +70,6 @@ def main():
             if(w > (h / minAspectRatio) or h > (w / minAspectRatio)):
                 continue
             #check if fruit istouching boundary
-            height, width, channels = roi_resized.shape
             if (x == 0 or (x+w) >= (width - 1)):
                 continue
 
