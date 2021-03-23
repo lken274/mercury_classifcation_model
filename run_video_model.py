@@ -4,12 +4,13 @@ import numpy as np
 import time
 import tensorflow as tf
 from inferenceutils import *
+from natsort import natsorted
 
-video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sequence_NIR_C3_blemish_01/*.jpg'
+video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sequence_VIS_C3_blemish_01/*.jpg'
 model_dir = 'inference_graph/saved_model'
 save_name = "demo_output/demo_single_NIR.avi"
 labelmap_path = 'dataset/labelmap.pbtxt'
-grayscale = True
+grayscale = False
 save_video = False
 show_mask = True
 
@@ -26,8 +27,7 @@ detection_threshold = 0.5
 
 def main():
     #load video from file
-    print(sorted(glob.glob(video_dir)))
-    frames = [cv2.imread(file) for file in sorted(glob.glob(video_dir))]
+    frames = [cv2.imread(file) for file in natsorted(glob.glob(video_dir))]
     frames = frames[skip_frames:]
     numFrames = len(frames) - skip_frames
     size = (frames[0].shape[1], frames[0].shape[0])
