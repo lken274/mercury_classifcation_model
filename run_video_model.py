@@ -6,24 +6,24 @@ import tensorflow as tf
 from inferenceutils import *
 from natsort import natsorted
 
-video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sequence_VIS_C3_blemish_01/*.jpg'
+video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sequence_VIS_C3_blemish_03/*.jpg'
 model_dir = 'inference_graph/saved_model'
-save_name = "demo_output/demo_single_NIR.avi"
+save_name = "demo_output/sequence_VIS_C3_blemish_03_sensitive.avi"
 labelmap_path = 'dataset/labelmap.pbtxt'
 grayscale = False
-save_video = False
-show_mask = True
+save_video = True
+show_mask = False
 
-render_scale = 0.25 #resolution rescaling during edge detection to improve performance
+render_scale = 0.33 #resolution rescaling during edge detection to improve performance
 skip_frames = 0 #start at a later point in the video so we aren't waiting for fruit
-low_Hue, low_Sat, low_Val = 5, 68, 60
-high_Hue, high_Sat, high_Val = 50, 255, 255
+low_Hue, low_Sat, low_Val = 0, 50, 65
+high_Hue, high_Sat, high_Val = 80, 255, 255
 light_fruit_colour = (high_Hue,high_Sat,high_Val)
 dark_fruit_colour = (low_Hue,low_Sat,low_Val)
 
 minFruitSize = 10000 * render_scale
 minAspectRatio = 0.5
-detection_threshold = 0.5
+detection_threshold = 0.35
 
 def main():
     #load video from file
@@ -33,6 +33,7 @@ def main():
     size = (frames[0].shape[1], frames[0].shape[0])
     category_index = label_map_util.create_category_index_from_labelmap(labelmap_path, use_display_name=True)
     model = tf.saved_model.load(model_dir)
+    clahe = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(4,4))
 
     if (save_video == True):
         out_vid = cv2.VideoWriter(save_name,cv2.VideoWriter_fourcc(*'DIVX'), 10, (size))
@@ -40,24 +41,29 @@ def main():
 
     for idx,roiFrame in enumerate(frames):
         print("Frame " + str(idx) + " of " + str(numFrames))
+        start_time = time.time()
         tf.keras.backend.clear_session()
-
+        roi_resized = cv2.resize(roiFrame, (round(render_scale*roiFrame.shape[1]), round(render_scale*roiFrame.shape[0])))
+        frame_blur = cv2.medianBlur(roi_resized, 5)
+        frame_lab = cv2.cvtColor(frame_blur, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(frame_lab)
+        cla = clahe.apply(l)
+        frame_blur_lab = cv2.merge((cla,a,b))
+        frame_blur = cv2.cvtColor(frame_blur_lab, cv2.COLOR_LAB2BGR)
+        #print("FPS: " + str((1 / (time.time() - start_time))))
+        
         if (grayscale == False):
-            roi_resized = cv2.resize(roiFrame, (round(render_scale*roiFrame.shape[1]), round(render_scale*roiFrame.shape[0])))
-            frame_HSV = cv2.cvtColor(roi_resized, cv2.COLOR_BGR2HSV) #convert to HSV
-            frame_blur = cv2.medianBlur(frame_HSV, 5) #remove noise
-            frame_threshold = cv2.inRange(frame_blur, dark_fruit_colour, light_fruit_colour)
-            height, width, channels = roi_resized.shape
+            frame_HSV = cv2.cvtColor(frame_blur, cv2.COLOR_BGR2HSV) #convert to HSV
+            frame_threshold = cv2.inRange(frame_HSV, dark_fruit_colour, light_fruit_colour)
+            height, width, channels = frame_blur.shape
         else:
-            grayFrame = cv2.cvtColor(roiFrame, cv2.COLOR_BGR2GRAY)
-            roi_resized = cv2.resize(grayFrame, (round(render_scale*grayFrame.shape[1]), 
-                                                round(render_scale*grayFrame.shape[0])))
-            frame_threshold = cv2.adaptiveThreshold(roi_resized, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            grayFrame = cv2.cvtColor(frame_blur, cv2.COLOR_BGR2GRAY)
+            frame_threshold = cv2.adaptiveThreshold(grayFrame, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                                     cv2.THRESH_BINARY, 11, 2)
             frame_threshold = cv2.bitwise_not(frame_threshold)
-            height, width = roi_resized.shape
+            height, width = grayFrame.shape
 
-        edges = cv2.Canny(frame_threshold, 150, 200)
+        edges = cv2.Canny(frame_threshold, 250, 300)
         contours = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[-2]#find contours
 
         cnn_outputs = []
@@ -88,10 +94,8 @@ def main():
             cv2.drawContours(mask, [contour],-1,(255,255,255), cv2.FILLED)
             img2gray = cv2.cvtColor(mask,cv2.COLOR_BGR2GRAY)
             maskedImage = cv2.bitwise_and(fruitCropBGR, fruitCropBGR, mask=img2gray)
-
             if (show_mask == True):
                 cv2.imshow('masked', maskedImage)
-                cv2.imshow('frame', roiFrame)
                 cv2.waitKey(10)
 
             output_dict = run_inference_for_single_image(model, maskedImage)
