@@ -50,7 +50,6 @@ def main():
         cla = clahe.apply(l)
         frame_blur_lab = cv2.merge((cla,a,b))
         frame_blur = cv2.cvtColor(frame_blur_lab, cv2.COLOR_LAB2BGR)
-        #print("FPS: " + str((1 / (time.time() - start_time))))
         
         if (grayscale == False):
             frame_HSV = cv2.cvtColor(frame_blur, cv2.COLOR_BGR2HSV) #convert to HSV
@@ -97,9 +96,10 @@ def main():
             if (show_mask == True):
                 cv2.imshow('masked', maskedImage)
                 cv2.waitKey(10)
-
+            start_time = time.time()
             output_dict = run_inference_for_single_image(model, maskedImage)
-
+            print("FPS: " + str((1 / (time.time() - start_time))))
+        
             boxes = output_dict['detection_boxes']
             #translate coordinate system from percentage of masked image to absolute full image
             for idx, pos in enumerate(boxes): 
