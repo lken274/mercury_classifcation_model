@@ -3,15 +3,26 @@ import cv2
 import numpy as np
 import time
 import tensorflow as tf
-from inferenceutils import *
 from natsort import natsorted
+import json
+import requests
+import base64
+
+from object_detection.utils import ops as utils_ops
+from object_detection.utils import label_map_util
+from object_detection.utils import visualization_utils as vis_util
+
+from tensorflow_serving.apis import predict_pb2
+from tensorflow_serving.apis import prediction_service_pb2
+from tensorflow_serving.apis import prediction_service_pb2_grpc
+import grpc
 
 video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sequence_VIS_C3_blemish_03/*.jpg'
-model_dir = 'inference_graph/saved_model'
+model_dir = 'inference_graph/saved_model/1'
 save_name = "demo_output/sequence_VIS_C3_blemish_03_sensitive.avi"
 labelmap_path = 'dataset/labelmap.pbtxt'
 grayscale = False
-save_video = True
+save_video = False
 show_mask = False
 
 render_scale = 0.33 #resolution rescaling during edge detection to improve performance
@@ -25,6 +36,8 @@ minFruitSize = 10000 * render_scale
 minAspectRatio = 0.5
 detection_threshold = 0.35
 
+num_batch_frames = 10
+
 def main():
     #load video from file
     frames = [cv2.imread(file) for file in natsorted(glob.glob(video_dir))]
@@ -32,16 +45,20 @@ def main():
     numFrames = len(frames) - skip_frames
     size = (frames[0].shape[1], frames[0].shape[0])
     category_index = label_map_util.create_category_index_from_labelmap(labelmap_path, use_display_name=True)
-    model = tf.saved_model.load(model_dir)
     clahe = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(4,4))
+
+    label = ['blemish']
+    GRPC_MAX_RECEIVE_MESSAGE_LENGTH = 4096 * 4096 * 3
+    channel = grpc.insecure_channel('0.0.0.0:8500', options=[('grpc.max_receive_message_length', GRPC_MAX_RECEIVE_MESSAGE_LENGTH)])
+    stub = prediction_service_pb2_grpc.PredictionServiceStub(channel)
 
     if (save_video == True):
         out_vid = cv2.VideoWriter(save_name,cv2.VideoWriter_fourcc(*'DIVX'), 10, (size))
-   
 
+    frame_images = []
+    batch_count = 0
     for idx,roiFrame in enumerate(frames):
         print("Frame " + str(idx) + " of " + str(numFrames))
-        start_time = time.time()
         tf.keras.backend.clear_session()
         roi_resized = cv2.resize(roiFrame, (round(render_scale*roiFrame.shape[1]), round(render_scale*roiFrame.shape[0])))
         frame_blur = cv2.medianBlur(roi_resized, 5)
@@ -50,7 +67,6 @@ def main():
         cla = clahe.apply(l)
         frame_blur_lab = cv2.merge((cla,a,b))
         frame_blur = cv2.cvtColor(frame_blur_lab, cv2.COLOR_LAB2BGR)
-        #print("FPS: " + str((1 / (time.time() - start_time))))
         
         if (grayscale == False):
             frame_HSV = cv2.cvtColor(frame_blur, cv2.COLOR_BGR2HSV) #convert to HSV
@@ -66,7 +82,6 @@ def main():
         edges = cv2.Canny(frame_threshold, 250, 300)
         contours = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[-2]#find contours
 
-        cnn_outputs = []
         for contour in contours:
             contour = cv2.approxPolyDP(contour,0.004*cv2.arcLength(contour,True),True)
             area = cv2.contourArea(contour, False) #get contouring area to cull bad contours
@@ -94,37 +109,61 @@ def main():
             cv2.drawContours(mask, [contour],-1,(255,255,255), cv2.FILLED)
             img2gray = cv2.cvtColor(mask,cv2.COLOR_BGR2GRAY)
             maskedImage = cv2.bitwise_and(fruitCropBGR, fruitCropBGR, mask=img2gray)
+            frame_images.append(maskedImage)
             if (show_mask == True):
                 cv2.imshow('masked', maskedImage)
                 cv2.waitKey(10)
+        #accumulate all images from this frame to send
+        if (len(frame_images) == 0):
+            continue
 
-            output_dict = run_inference_for_single_image(model, maskedImage)
+        batch_count = batch_count + 1
+        if (batch_count < num_batch_frames):
+            continue
 
-            boxes = output_dict['detection_boxes']
-            #translate coordinate system from percentage of masked image to absolute full image
-            for idx, pos in enumerate(boxes): 
-                ymin = pos[0] * origH + origY
-                ymax = pos[2] * origH + origY
-                xmin = pos[1] * origW + origX
-                xmax = pos[3] * origW + origX
-                boxes[idx] = [ymin, xmin, ymax, xmax]
-
-            cnn_outputs.append(output_dict)
-            vis_util.visualize_boxes_and_labels_on_image_array(
-            roiFrame,
-            output_dict['detection_boxes'],
-            output_dict['detection_classes'],
-            output_dict['detection_scores'],
-            category_index,
-            instance_masks=output_dict.get('detection_masks_reframed', None),
-            use_normalized_coordinates=False,
-            line_thickness=3,
-            min_score_thresh=detection_threshold)
+        start_time = time.time()
+        output_response = query_serving(frame_images, stub)
+        print("Fps: " + str(1.0 / (time.time() - start_time) * num_batch_frames))
+        frame_images = []
+        batch_count = 0
+        # boxes = output_response.outputs['detection_boxes']
+        # #translate coordinate system from percentage of masked image to absolute full image
+        # for idx, pos in enumerate(boxes): 
+        #     ymin = pos[0] * origH + origY
+        #     ymax = pos[2] * origH + origY
+        #     xmin = pos[1] * origW + origX
+        #     xmax = pos[3] * origW + origX
+        #     boxes[idx] = [ymin, xmin, ymax, xmax]
+        # boxes = np.array(boxes)
+        # vis_util.visualize_boxes_and_labels_on_image_array(
+        # roiFrame,
+        # boxes,
+        # np.array(output_dict['detection_classes'], dtype=np.uint8),
+        # output_dict['detection_scores'],
+        # category_index,
+        # instance_masks=output_dict.get('detection_masks_reframed', None),
+        # use_normalized_coordinates=False,
+        # line_thickness=3,
+        # min_score_thresh=detection_threshold)
 
         if (save_video == True):
             out_vid.write(roiFrame)
     if(save_video == True):
         out_vid.release()
+
+def query_serving(maskedImageList, stub):        
+    grpc_request = predict_pb2.PredictRequest()
+    grpc_request.model_spec.name = 'blemish_detector'
+    grpc_request.model_spec.signature_name = 'serving_default'
+    image_data = []
+    
+    for image in maskedImageList:
+        buffer = cv2.imencode('.png', image)[1].tostring()
+        image_data.append(buffer)
+    grpc_request.inputs["input_tensor"].CopyFrom(
+    tf.make_tensor_proto(image_data, dtype=tf.dtypes.string, shape=[len(image_data)]))
+    result = stub.Predict(grpc_request, 5)  # 10 secs timeout
+    return result
 
 if __name__ == "__main__":
     main()
