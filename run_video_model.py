@@ -36,7 +36,7 @@ minFruitSize = 10000 * render_scale
 minAspectRatio = 0.5
 detection_threshold = 0.35
 
-num_batch_frames = 10
+num_batch_frames = 8
 
 def main():
     #load video from file
@@ -48,8 +48,9 @@ def main():
     clahe = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(4,4))
 
     label = ['blemish']
-    GRPC_MAX_RECEIVE_MESSAGE_LENGTH = 4096 * 4096 * 3
-    channel = grpc.insecure_channel('0.0.0.0:8500', options=[('grpc.max_receive_message_length', GRPC_MAX_RECEIVE_MESSAGE_LENGTH)])
+    GRPC_MAX_RECEIVE_MESSAGE_LENGTH = 4096 * 4096 * 3 * 2
+    GRPC_MAX_SEND_MESSAGE_LENGTH = 4096 * 4096 * 3 * 2
+    channel = grpc.insecure_channel('0.0.0.0:8500', options=[('grpc.max_receive_message_length', GRPC_MAX_RECEIVE_MESSAGE_LENGTH), ('grpc.max_send_message_length', GRPC_MAX_SEND_MESSAGE_LENGTH)])
     stub = prediction_service_pb2_grpc.PredictionServiceStub(channel)
 
     if (save_video == True):
@@ -120,31 +121,13 @@ def main():
         batch_count = batch_count + 1
         if (batch_count < num_batch_frames):
             continue
-
+        
+        print("Sending " + str(len(frame_images)))
         start_time = time.time()
         output_response = query_serving(frame_images, stub)
         print("Fps: " + str(1.0 / (time.time() - start_time) * num_batch_frames))
-        frame_images = []
+        frame_images.clear()
         batch_count = 0
-        # boxes = output_response.outputs['detection_boxes']
-        # #translate coordinate system from percentage of masked image to absolute full image
-        # for idx, pos in enumerate(boxes): 
-        #     ymin = pos[0] * origH + origY
-        #     ymax = pos[2] * origH + origY
-        #     xmin = pos[1] * origW + origX
-        #     xmax = pos[3] * origW + origX
-        #     boxes[idx] = [ymin, xmin, ymax, xmax]
-        # boxes = np.array(boxes)
-        # vis_util.visualize_boxes_and_labels_on_image_array(
-        # roiFrame,
-        # boxes,
-        # np.array(output_dict['detection_classes'], dtype=np.uint8),
-        # output_dict['detection_scores'],
-        # category_index,
-        # instance_masks=output_dict.get('detection_masks_reframed', None),
-        # use_normalized_coordinates=False,
-        # line_thickness=3,
-        # min_score_thresh=detection_threshold)
 
         if (save_video == True):
             out_vid.write(roiFrame)
