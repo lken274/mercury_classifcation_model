@@ -36,10 +36,13 @@ minFruitSize = 10000 * render_scale
 minAspectRatio = 0.5
 detection_threshold = 0.35
 
+num_boxes_per_frame = 100 #fixme: retrain model for just 15 max boxes
+
 num_batch_frames = 1
 
 def main():
     #load video from file
+    tf.keras.backend.clear_session()
     frames = [cv2.imread(file) for file in natsorted(glob.glob(video_dir))]
     frames = frames[skip_frames:]
     numFrames = len(frames) - skip_frames
@@ -82,6 +85,8 @@ def main():
         edges = cv2.Canny(frame_threshold, 250, 300)
         contours = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[-2]#find contours
 
+        boundingBoxes = []
+
         for contour in contours:
             contour = cv2.approxPolyDP(contour,0.004*cv2.arcLength(contour,True),True)
             area = cv2.contourArea(contour, False) #get contouring area to cull bad contours
@@ -96,6 +101,7 @@ def main():
 
             contour = contour.squeeze()
             x,y,w,h = cv2.boundingRect(contour)
+
             for point in contour:
                 point[0] = round((point[0] - x) / render_scale)
                 point[1] = round((point[1] - y) / render_scale)
@@ -103,6 +109,7 @@ def main():
             #create a mask based on hull contours, (drawContours) [fruitHullMask]
             origY, origH = round(y / render_scale), round(h / render_scale)
             origX, origW = round(x / render_scale), round(w / render_scale)
+            boundingBoxes.append((origX, origY, origW, origH))
             fruitCropBGR = roiFrame[origY:origY+origH, origX:origX+origW]
 
             mask = np.zeros(fruitCropBGR.shape, dtype='uint8')
@@ -142,13 +149,15 @@ def main():
         classes = get_float_vals(output_response.outputs['detection_classes'])
         scores = get_float_vals(output_response.outputs['detection_scores'])
         #masked_reframed = get_float_vals(output_response.outputs['detection_masks_reframed'])
-        masked_reframed = [np.array([0])] * len(boxes)
+        masked_reframed = None
         #translate coordinate system from percentage of masked image to absolute full image
         for idx, pos in enumerate(boxes): 
-            ymin = pos[0] * origH + origY
-            ymax = pos[2] * origH + origY
-            xmin = pos[1] * origW + origX
-            xmax = pos[3] * origW + origX
+            current_fruit_image = int(idx / num_boxes_per_frame) 
+            bbox = boundingBoxes[current_fruit_image]
+            ymin = pos[0] * bbox[3] + bbox[1]
+            ymax = pos[2] * bbox[3] + bbox[1]
+            xmin = pos[1] * bbox[2] + bbox[0]
+            xmax = pos[3] * bbox[2] + bbox[0]
             boxes[idx] = [ymin, xmin, ymax, xmax]
         boxes = np.array(boxes)
         vis_util.visualize_boxes_and_labels_on_image_array(
@@ -161,9 +170,6 @@ def main():
         use_normalized_coordinates=False,
         line_thickness=3,
         min_score_thresh=detection_threshold)
-
-        cv2.imshow('a',roiFrame)
-        cv2.waitKey()
 
         if (save_video == True):
             out_vid.write(roiFrame)
