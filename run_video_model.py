@@ -36,7 +36,7 @@ minFruitSize = 10000 * render_scale
 minAspectRatio = 0.5
 detection_threshold = 0.35
 
-num_boxes_per_frame = 100 #fixme: retrain model for just 15 max boxes
+num_boxes_per_frame = 10
 
 num_batch_frames = 1
 
