@@ -26,7 +26,7 @@ save_video = False
 show_mask = False
 
 render_scale = 0.33 #resolution rescaling during edge detection to improve performance
-skip_frames = 0 #start at a later point in the video so we aren't waiting for fruit
+skip_frames = 150 #start at a later point in the video so we aren't waiting for fruit
 low_Hue, low_Sat, low_Val = 0, 50, 65
 high_Hue, high_Sat, high_Val = 80, 255, 255
 light_fruit_colour = (high_Hue,high_Sat,high_Val)
@@ -36,7 +36,7 @@ minFruitSize = 10000 * render_scale
 minAspectRatio = 0.5
 detection_threshold = 0.35
 
-num_batch_frames = 8
+num_batch_frames = 1
 
 def main():
     #load video from file
@@ -60,7 +60,6 @@ def main():
     batch_count = 0
     for idx,roiFrame in enumerate(frames):
         print("Frame " + str(idx) + " of " + str(numFrames))
-        tf.keras.backend.clear_session()
         roi_resized = cv2.resize(roiFrame, (round(render_scale*roiFrame.shape[1]), round(render_scale*roiFrame.shape[0])))
         frame_blur = cv2.medianBlur(roi_resized, 5)
         frame_lab = cv2.cvtColor(frame_blur, cv2.COLOR_BGR2LAB)
@@ -129,10 +128,50 @@ def main():
         frame_images.clear()
         batch_count = 0
 
+        boxes_raw = get_float_vals(output_response.outputs['detection_boxes'])
+        boxes = []
+        counter = 0
+        one_box = []
+        for coord in boxes_raw:
+            counter = counter + 1
+            one_box.append(coord)
+            if (counter == 4):
+                boxes.append(tuple(one_box))
+                one_box.clear()
+                counter = 0
+        classes = get_float_vals(output_response.outputs['detection_classes'])
+        scores = get_float_vals(output_response.outputs['detection_scores'])
+        #masked_reframed = get_float_vals(output_response.outputs['detection_masks_reframed'])
+        masked_reframed = [np.array([0])] * len(boxes)
+        #translate coordinate system from percentage of masked image to absolute full image
+        for idx, pos in enumerate(boxes): 
+            ymin = pos[0] * origH + origY
+            ymax = pos[2] * origH + origY
+            xmin = pos[1] * origW + origX
+            xmax = pos[3] * origW + origX
+            boxes[idx] = [ymin, xmin, ymax, xmax]
+        boxes = np.array(boxes)
+        vis_util.visualize_boxes_and_labels_on_image_array(
+        roiFrame,
+        boxes,
+        np.array(classes, dtype=np.uint8),
+        scores,
+        category_index,
+        instance_masks=masked_reframed,
+        use_normalized_coordinates=False,
+        line_thickness=3,
+        min_score_thresh=detection_threshold)
+
+        cv2.imshow('a',roiFrame)
+        cv2.waitKey()
+
         if (save_video == True):
             out_vid.write(roiFrame)
     if(save_video == True):
         out_vid.release()
+
+def get_float_vals(result):
+    return list(result.float_val)
 
 def query_serving(maskedImageList, stub):        
     grpc_request = predict_pb2.PredictRequest()
