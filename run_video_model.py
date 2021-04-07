@@ -7,7 +7,6 @@ from natsort import natsorted
 import json
 import requests
 import base64
-import multiprocessing
 
 from object_detection.utils import ops as utils_ops
 from object_detection.utils import label_map_util
@@ -18,12 +17,12 @@ from tensorflow_serving.apis import prediction_service_pb2
 from tensorflow_serving.apis import prediction_service_pb2_grpc
 import grpc
 
-video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sequence_VIS_C3_blemish_03/*.jpg'
+video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sequence_VIS_C3_blemish_01/*.jpg'
 model_dir = 'inference_graph/saved_model/1'
-save_name = "demo_output/sequence_VIS_C3_blemish_03_sensitive_serving.avi"
+save_name = "demo_output/sequence_VIS_C3_blemish_01_320.avi"
 labelmap_path = 'dataset/labelmap.pbtxt'
 grayscale = False
-save_video = False
+save_video = True
 show_mask = False
 
 render_scale = 0.33 #resolution rescaling during edge detection to improve performance
@@ -35,7 +34,7 @@ dark_fruit_colour = (low_Hue,low_Sat,low_Val)
 
 minFruitSize = 10000 * render_scale
 minAspectRatio = 0.5
-detection_threshold = 0.35
+detection_threshold = 0.4
 
 num_boxes_per_frame = 10
 
@@ -46,7 +45,7 @@ def main():
     tf.keras.backend.clear_session()
     frames = [cv2.imread(file) for file in natsorted(glob.glob(video_dir))]
     frames = frames[skip_frames:]
-    numFrames = len(frames) - skip_frames
+    numFrames = len(frames)
     size = (frames[0].shape[1], frames[0].shape[0])
     category_index = label_map_util.create_category_index_from_labelmap(labelmap_path, use_display_name=True)
     clahe = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(4,4))
@@ -62,9 +61,6 @@ def main():
 
     frame_images = []
     batch_count = 0
-    query_thread = None
-    manager = multiprocessing.Manager()
-    tf_response_q = manager.Queue()
     for idx,roiFrame in enumerate(frames):
         print("Frame " + str(idx) + " of " + str(numFrames))
         roi_resized = cv2.resize(roiFrame, (round(render_scale*roiFrame.shape[1]), round(render_scale*roiFrame.shape[0])))
@@ -134,63 +130,63 @@ def main():
         
         print("Sending " + str(len(frame_images)))
         start_time = time.time()
-        query_thread = multiprocessing.Process(name='tf_serving', target=query_serving, args=(frame_images, stub, tf_response_q))
-        query_thread.start()
-        
+        output_response = query_serving(frame_images, stub)
+        print("Fps: " + str(1.0 / (time.time() - start_time) * num_batch_frames))
         frame_images.clear()
         batch_count = 0
 
-        if (query_thread != None):
-            query_thread.join()
+        boxes_raw = get_float_vals(output_response.outputs['detection_boxes'])
+        boxes = []
+        counter = 0
+        one_box = []
+        for coord in boxes_raw:
+            counter = counter + 1
+            one_box.append(coord)
+            if (counter == 4):
+                boxes.append(tuple(one_box))
+                one_box.clear()
+                counter = 0
+        classes = get_float_vals(output_response.outputs['detection_classes'])
+        scores = get_float_vals(output_response.outputs['detection_scores'])
+        #masked_reframed = get_float_vals(output_response.outputs['detection_masks_reframed'])
+        masked_reframed = None
+        #translate coordinate system from percentage of masked image to absolute full image
+        for idx, pos in enumerate(boxes): 
+            current_fruit_image = int(idx / num_boxes_per_frame) 
+            bbox = boundingBoxes[current_fruit_image]
+            ymin = pos[0] * bbox[3] + bbox[1]
+            ymax = pos[2] * bbox[3] + bbox[1]
+            xmin = pos[1] * bbox[2] + bbox[0]
+            xmax = pos[3] * bbox[2] + bbox[0]
+            boxes[idx] = [ymin, xmin, ymax, xmax]
 
-        if (tf_response_q.empty() == False):
-            print("Fps: " + str(1.0 / (time.time() - start_time) * num_batch_frames))
-            output_response = tf_response_q.get()
-            boxes_raw = get_float_vals(output_response.outputs['detection_boxes'])
-            boxes = []
-            counter = 0
-            one_box = []
-            for coord in boxes_raw:
-                counter = counter + 1
-                one_box.append(coord)
-                if (counter == 4):
-                    boxes.append(tuple(one_box))
-                    one_box.clear()
-                    counter = 0
-            classes = get_float_vals(output_response.outputs['detection_classes'])
-            scores = get_float_vals(output_response.outputs['detection_scores'])
-            #masked_reframed = get_float_vals(output_response.outputs['detection_masks_reframed'])
-            masked_reframed = None
-            #translate coordinate system from percentage of masked image to absolute full image
-            for idx, pos in enumerate(boxes): 
-                current_fruit_image = int(idx / num_boxes_per_frame) 
-                bbox = boundingBoxes[current_fruit_image]
-                ymin = pos[0] * bbox[3] + bbox[1]
-                ymax = pos[2] * bbox[3] + bbox[1]
-                xmin = pos[1] * bbox[2] + bbox[0]
-                xmax = pos[3] * bbox[2] + bbox[0]
-                boxes[idx] = [ymin, xmin, ymax, xmax]
-            boxes = np.array(boxes)
-            vis_util.visualize_boxes_and_labels_on_image_array(
-            roiFrame,
-            boxes,
-            np.array(classes, dtype=np.uint8),
-            scores,
-            category_index,
-            instance_masks=masked_reframed,
-            use_normalized_coordinates=False,
-            line_thickness=3,
-            min_score_thresh=detection_threshold)
+        boxes,scores = cull_below_threshold(boxes, scores, detection_threshold)
+        boxes = np.array(boxes)
+        scores = np.array(scores)
+        boxes, scores = non_max_suppression_fast(boxes, scores, 0.2)
+        boxes = np.array(boxes)
+        scores = np.array(scores)
 
-            if (save_video == True):
-                out_vid.write(roiFrame)
+        vis_util.visualize_boxes_and_labels_on_image_array(
+        roiFrame,
+        boxes,
+        np.array(classes, dtype=np.uint8),
+        scores,
+        category_index,
+        instance_masks=masked_reframed,
+        use_normalized_coordinates=False,
+        line_thickness=3,
+        min_score_thresh=detection_threshold)
+
+        if (save_video == True):
+            out_vid.write(roiFrame)
     if(save_video == True):
         out_vid.release()
 
 def get_float_vals(result):
     return list(result.float_val)
 
-def query_serving(maskedImageList, stub, dataq):        
+def query_serving(maskedImageList, stub):        
     grpc_request = predict_pb2.PredictRequest()
     grpc_request.model_spec.name = 'blemish_detector'
     grpc_request.model_spec.signature_name = 'serving_default'
@@ -202,8 +198,62 @@ def query_serving(maskedImageList, stub, dataq):
     grpc_request.inputs["input_tensor"].CopyFrom(
     tf.make_tensor_proto(image_data, dtype=tf.dtypes.string, shape=[len(image_data)]))
     result = stub.Predict(grpc_request, 5)  # 10 secs timeout
-    dataq.put(result)
-    return
+    return result
+
+def cull_below_threshold(boxes, scores, thresh):
+    new_boxes = []
+    new_scores = []
+    for idx,score in enumerate(scores):
+        if (score >= thresh):
+            new_boxes.append(boxes[idx])
+            new_scores.append(score)
+    return (new_boxes, new_scores)
+
+def non_max_suppression_fast(boxes, scores, overlapThresh):
+    # if there are no boxes, return an empty list
+    if len(boxes) == 0:
+        return ([],[])
+    # if the bounding boxes integers, convert them to floats --
+    # this is important since we'll be doing a bunch of divisions
+    if boxes.dtype.kind == "i":
+        boxes = boxes.astype("float")
+    # initialize the list of picked indexes	
+    pick = []
+    # grab the coordinates of the bounding boxes
+    y1 = boxes[:,0]
+    x1 = boxes[:,1]
+    y2 = boxes[:,2]
+    x2 = boxes[:,3]
+    # compute the area of the bounding boxes and sort the bounding
+    # boxes by the bottom-right y-coordinate of the bounding box
+    area = (x2 - x1 + 1) * (y2 - y1 + 1)
+    idxs = np.argsort(y2)
+    # keep looping while some indexes still remain in the indexes
+    # list
+    while len(idxs) > 0:
+        # grab the last index in the indexes list and add the
+        # index value to the list of picked indexes
+        last = len(idxs) - 1
+        i = idxs[last]
+        pick.append(i)
+        # find the largest (x, y) coordinates for the start of
+        # the bounding box and the smallest (x, y) coordinates
+        # for the end of the bounding box
+        xx1 = np.maximum(x1[i], x1[idxs[:last]])
+        yy1 = np.maximum(y1[i], y1[idxs[:last]])
+        xx2 = np.minimum(x2[i], x2[idxs[:last]])
+        yy2 = np.minimum(y2[i], y2[idxs[:last]])
+        # compute the width and height of the bounding box
+        w = np.maximum(0, xx2 - xx1 + 1)
+        h = np.maximum(0, yy2 - yy1 + 1)
+        # compute the ratio of overlap
+        overlap = (w * h) / area[idxs[:last]]
+        # delete all indexes from the index list that have
+        idxs = np.delete(idxs, np.concatenate(([last],
+            np.where(overlap > overlapThresh)[0])))
+    # return only the bounding boxes that were picked using the
+    # integer data type
+    return (boxes[pick].astype("int"), scores[pick].astype("float"))
 
 if __name__ == "__main__":
     main()
