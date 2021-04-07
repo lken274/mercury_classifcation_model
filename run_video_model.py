@@ -7,6 +7,7 @@ from natsort import natsorted
 import json
 import requests
 import base64
+import multiprocessing
 
 from object_detection.utils import ops as utils_ops
 from object_detection.utils import label_map_util
@@ -19,14 +20,14 @@ import grpc
 
 video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sequence_VIS_C3_blemish_03/*.jpg'
 model_dir = 'inference_graph/saved_model/1'
-save_name = "demo_output/sequence_VIS_C3_blemish_03_sensitive.avi"
+save_name = "demo_output/sequence_VIS_C3_blemish_03_sensitive_serving.avi"
 labelmap_path = 'dataset/labelmap.pbtxt'
 grayscale = False
 save_video = False
 show_mask = False
 
 render_scale = 0.33 #resolution rescaling during edge detection to improve performance
-skip_frames = 150 #start at a later point in the video so we aren't waiting for fruit
+skip_frames = 0 #start at a later point in the video so we aren't waiting for fruit
 low_Hue, low_Sat, low_Val = 0, 50, 65
 high_Hue, high_Sat, high_Val = 80, 255, 255
 light_fruit_colour = (high_Hue,high_Sat,high_Val)
@@ -61,6 +62,9 @@ def main():
 
     frame_images = []
     batch_count = 0
+    query_thread = None
+    manager = multiprocessing.Manager()
+    tf_response_q = manager.Queue()
     for idx,roiFrame in enumerate(frames):
         print("Frame " + str(idx) + " of " + str(numFrames))
         roi_resized = cv2.resize(roiFrame, (round(render_scale*roiFrame.shape[1]), round(render_scale*roiFrame.shape[0])))
@@ -130,56 +134,63 @@ def main():
         
         print("Sending " + str(len(frame_images)))
         start_time = time.time()
-        output_response = query_serving(frame_images, stub)
-        print("Fps: " + str(1.0 / (time.time() - start_time) * num_batch_frames))
+        query_thread = multiprocessing.Process(name='tf_serving', target=query_serving, args=(frame_images, stub, tf_response_q))
+        query_thread.start()
+        
         frame_images.clear()
         batch_count = 0
 
-        boxes_raw = get_float_vals(output_response.outputs['detection_boxes'])
-        boxes = []
-        counter = 0
-        one_box = []
-        for coord in boxes_raw:
-            counter = counter + 1
-            one_box.append(coord)
-            if (counter == 4):
-                boxes.append(tuple(one_box))
-                one_box.clear()
-                counter = 0
-        classes = get_float_vals(output_response.outputs['detection_classes'])
-        scores = get_float_vals(output_response.outputs['detection_scores'])
-        #masked_reframed = get_float_vals(output_response.outputs['detection_masks_reframed'])
-        masked_reframed = None
-        #translate coordinate system from percentage of masked image to absolute full image
-        for idx, pos in enumerate(boxes): 
-            current_fruit_image = int(idx / num_boxes_per_frame) 
-            bbox = boundingBoxes[current_fruit_image]
-            ymin = pos[0] * bbox[3] + bbox[1]
-            ymax = pos[2] * bbox[3] + bbox[1]
-            xmin = pos[1] * bbox[2] + bbox[0]
-            xmax = pos[3] * bbox[2] + bbox[0]
-            boxes[idx] = [ymin, xmin, ymax, xmax]
-        boxes = np.array(boxes)
-        vis_util.visualize_boxes_and_labels_on_image_array(
-        roiFrame,
-        boxes,
-        np.array(classes, dtype=np.uint8),
-        scores,
-        category_index,
-        instance_masks=masked_reframed,
-        use_normalized_coordinates=False,
-        line_thickness=3,
-        min_score_thresh=detection_threshold)
+        if (query_thread != None):
+            query_thread.join()
 
-        if (save_video == True):
-            out_vid.write(roiFrame)
+        if (tf_response_q.empty() == False):
+            print("Fps: " + str(1.0 / (time.time() - start_time) * num_batch_frames))
+            output_response = tf_response_q.get()
+            boxes_raw = get_float_vals(output_response.outputs['detection_boxes'])
+            boxes = []
+            counter = 0
+            one_box = []
+            for coord in boxes_raw:
+                counter = counter + 1
+                one_box.append(coord)
+                if (counter == 4):
+                    boxes.append(tuple(one_box))
+                    one_box.clear()
+                    counter = 0
+            classes = get_float_vals(output_response.outputs['detection_classes'])
+            scores = get_float_vals(output_response.outputs['detection_scores'])
+            #masked_reframed = get_float_vals(output_response.outputs['detection_masks_reframed'])
+            masked_reframed = None
+            #translate coordinate system from percentage of masked image to absolute full image
+            for idx, pos in enumerate(boxes): 
+                current_fruit_image = int(idx / num_boxes_per_frame) 
+                bbox = boundingBoxes[current_fruit_image]
+                ymin = pos[0] * bbox[3] + bbox[1]
+                ymax = pos[2] * bbox[3] + bbox[1]
+                xmin = pos[1] * bbox[2] + bbox[0]
+                xmax = pos[3] * bbox[2] + bbox[0]
+                boxes[idx] = [ymin, xmin, ymax, xmax]
+            boxes = np.array(boxes)
+            vis_util.visualize_boxes_and_labels_on_image_array(
+            roiFrame,
+            boxes,
+            np.array(classes, dtype=np.uint8),
+            scores,
+            category_index,
+            instance_masks=masked_reframed,
+            use_normalized_coordinates=False,
+            line_thickness=3,
+            min_score_thresh=detection_threshold)
+
+            if (save_video == True):
+                out_vid.write(roiFrame)
     if(save_video == True):
         out_vid.release()
 
 def get_float_vals(result):
     return list(result.float_val)
 
-def query_serving(maskedImageList, stub):        
+def query_serving(maskedImageList, stub, dataq):        
     grpc_request = predict_pb2.PredictRequest()
     grpc_request.model_spec.name = 'blemish_detector'
     grpc_request.model_spec.signature_name = 'serving_default'
@@ -191,7 +202,8 @@ def query_serving(maskedImageList, stub):
     grpc_request.inputs["input_tensor"].CopyFrom(
     tf.make_tensor_proto(image_data, dtype=tf.dtypes.string, shape=[len(image_data)]))
     result = stub.Predict(grpc_request, 5)  # 10 secs timeout
-    return result
+    dataq.put(result)
+    return
 
 if __name__ == "__main__":
     main()

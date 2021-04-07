@@ -1,0 +1,6 @@
+July 2020:
+	- class2_dark_blemish_closeup [0:16 annotated] [need 17:20] [sent]
+	- class2_light_blemish_closeup [0:14 annotated] [need 15:21] [sent]
+	- class3_dark_blemish_closeup [None annotated] [need 0:15] [sent]
+	- reject_dark_blemish_closeup [None annotated] [need 0:19] [sent]
+	- class3_light_blemish_closeup [None annotated] [need 0:15] [sent] 
