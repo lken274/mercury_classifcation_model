@@ -65,6 +65,9 @@ def main():
     query_thread = None
     manager = multiprocessing.Manager()
     tf_response_q = manager.Queue()
+
+    first_cycle = True
+
     for idx,roiFrame in enumerate(frames):
         print("Frame " + str(idx) + " of " + str(numFrames))
         roi_resized = cv2.resize(roiFrame, (round(render_scale*roiFrame.shape[1]), round(render_scale*roiFrame.shape[0])))
@@ -132,13 +135,6 @@ def main():
         if (batch_count < num_batch_frames):
             continue
         
-        print("Sending " + str(len(frame_images)))
-        start_time = time.time()
-        query_thread = multiprocessing.Process(name='tf_serving', target=query_serving, args=(frame_images, stub, tf_response_q))
-        query_thread.start()
-        
-        frame_images.clear()
-        batch_count = 0
 
         if (query_thread != None):
             query_thread.join()
@@ -164,7 +160,7 @@ def main():
             #translate coordinate system from percentage of masked image to absolute full image
             for idx, pos in enumerate(boxes): 
                 current_fruit_image = int(idx / num_boxes_per_frame) 
-                bbox = boundingBoxes[current_fruit_image]
+                bbox = previous_boundingBoxes[current_fruit_image]
                 ymin = pos[0] * bbox[3] + bbox[1]
                 ymax = pos[2] * bbox[3] + bbox[1]
                 xmin = pos[1] * bbox[2] + bbox[0]
@@ -172,7 +168,7 @@ def main():
                 boxes[idx] = [ymin, xmin, ymax, xmax]
             boxes = np.array(boxes)
             vis_util.visualize_boxes_and_labels_on_image_array(
-            roiFrame,
+            prev_roiFrame,
             boxes,
             np.array(classes, dtype=np.uint8),
             scores,
@@ -182,8 +178,29 @@ def main():
             line_thickness=3,
             min_score_thresh=detection_threshold)
 
+            print("Sending " + str(len(frame_images)))
+            start_time = time.time()
+            query_thread = multiprocessing.Process(name='tf_serving', target=query_serving, args=(frame_images, stub, tf_response_q))
+            query_thread.start()
+            previous_boundingBoxes = boundingBoxes[:]
+            prev_roiFrame = np.copy(roiFrame)
+            frame_images.clear()
+            batch_count = 0
+
             if (save_video == True):
-                out_vid.write(roiFrame)
+                out_vid.write(prev_roiFrame)
+                
+        if (first_cycle == True):
+            first_cycle = False
+            print("Sending " + str(len(frame_images)))
+            start_time = time.time()
+            query_thread = multiprocessing.Process(name='tf_serving', target=query_serving, args=(frame_images, stub, tf_response_q))
+            query_thread.start()
+            previous_boundingBoxes = boundingBoxes[:]
+            prev_roiFrame = np.copy(roiFrame)
+            frame_images.clear()
+            batch_count = 0
+   
     if(save_video == True):
         out_vid.release()
 
