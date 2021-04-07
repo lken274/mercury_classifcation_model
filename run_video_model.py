@@ -18,17 +18,19 @@ from tensorflow_serving.apis import prediction_service_pb2_grpc
 import grpc
 
 video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sequence_VIS_C3_blemish_01/*.jpg'
-model_dir = 'inference_graph/saved_model/1'
-save_name = "demo_output/sequence_VIS_C3_blemish_01_320.avi"
+model_dir = 'inference_graph/saved_model/efficientdet/1/'
+save_name = "demo_output/sequence_VIS_C3_blemish_01.avi"
 labelmap_path = 'dataset/labelmap.pbtxt'
 grayscale = False
 save_video = True
 show_mask = False
 
-render_scale = 0.33 #resolution rescaling during edge detection to improve performance
+render_scale = 0.5 #resolution rescaling during edge detection to improve performance
 skip_frames = 0 #start at a later point in the video so we aren't waiting for fruit
 low_Hue, low_Sat, low_Val = 0, 50, 65
 high_Hue, high_Sat, high_Val = 80, 255, 255
+#low_Hue, low_Sat, low_Val = 0, 62, 82
+#high_Hue, high_Sat, high_Val = 80, 255, 255
 light_fruit_colour = (high_Hue,high_Sat,high_Val)
 dark_fruit_colour = (low_Hue,low_Sat,low_Val)
 
@@ -82,16 +84,17 @@ def main():
             frame_threshold = cv2.bitwise_not(frame_threshold)
             height, width = grayFrame.shape
 
-        edges = cv2.Canny(frame_threshold, 250, 300)
-        contours = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[-2]#find contours
+        contours = cv2.findContours(frame_threshold, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[-2]#find contours
 
         boundingBoxes = []
 
         for contour in contours:
             contour = cv2.approxPolyDP(contour,0.004*cv2.arcLength(contour,True),True)
             area = cv2.contourArea(contour, False) #get contouring area to cull bad contours
+
             if (area < minFruitSize):
                 continue
+
             x,y,w,h = cv2.boundingRect(contour)
             if(w > (h / minAspectRatio) or h > (w / minAspectRatio)):
                 continue

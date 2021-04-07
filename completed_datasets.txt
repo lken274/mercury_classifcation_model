@@ -1,6 +1,11 @@
 July 2020:
-	- class2_dark_blemish_closeup [0:16 annotated] [need 17:20] [sent]
-	- class2_light_blemish_closeup [0:14 annotated] [need 15:21] [sent]
-	- class3_dark_blemish_closeup [None annotated] [need 0:15] [sent]
-	- reject_dark_blemish_closeup [None annotated] [need 0:19] [sent]
-	- class3_light_blemish_closeup [None annotated] [need 0:15] [sent] 
+	- class2_dark_blemish_closeup [done]
+	- class2_light_blemish_closeup [done]
+	- class3_dark_blemish_closeup [done]
+	- reject_dark_blemish_closeup [done]
+	- class3_light_blemish_closeup [done]
+	
+
+March 2021
+    - VIS_cuts_indentations_Gold_01 [need 0:20]
+    - VIS_fresh_cuts_Gold_01 [need 0:23] [sent]
