@@ -17,9 +17,9 @@ from tensorflow_serving.apis import prediction_service_pb2
 from tensorflow_serving.apis import prediction_service_pb2_grpc
 import grpc
 
-video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/sequence_VIS_C3_blemish_01/*.jpg'
-model_dir = 'inference_graph/saved_model/efficientdet/1/'
-save_name = "demo_output/sequence_VIS_C3_blemish_01.avi"
+video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/VIS_fresh_cuts_Gold_05/*.jpg'
+model_dir = 'inference_graph/saved_model/resnet101/1/'
+save_name = "demo_output/VIS_fresh_cuts_Gold_05.avi"
 labelmap_path = 'dataset/labelmap.pbtxt'
 grayscale = False
 save_video = True
@@ -27,7 +27,7 @@ show_mask = False
 
 render_scale = 0.5 #resolution rescaling during edge detection to improve performance
 skip_frames = 0 #start at a later point in the video so we aren't waiting for fruit
-low_Hue, low_Sat, low_Val = 0, 50, 65
+low_Hue, low_Sat, low_Val = 0, 48, 62
 high_Hue, high_Sat, high_Val = 80, 255, 255
 #low_Hue, low_Sat, low_Val = 0, 62, 82
 #high_Hue, high_Sat, high_Val = 80, 255, 255
@@ -36,9 +36,9 @@ dark_fruit_colour = (low_Hue,low_Sat,low_Val)
 
 minFruitSize = 10000 * render_scale
 minAspectRatio = 0.5
-detection_threshold = 0.4
+detection_threshold = 0.3
 
-num_boxes_per_frame = 10
+num_boxes_per_frame = 100
 
 num_batch_frames = 1
 
@@ -166,7 +166,7 @@ def main():
         boxes,scores = cull_below_threshold(boxes, scores, detection_threshold)
         boxes = np.array(boxes)
         scores = np.array(scores)
-        boxes, scores = non_max_suppression_fast(boxes, scores, 0.2)
+        #boxes, scores = non_max_suppression_fast(boxes, scores, 0.2)
         boxes = np.array(boxes)
         scores = np.array(scores)
 

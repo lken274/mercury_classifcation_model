@@ -2,3 +2,8 @@ item {
     name: "blemish"
     id: 1
 }
+
+item {
+    name: "cut"
+    id: 2
+}
