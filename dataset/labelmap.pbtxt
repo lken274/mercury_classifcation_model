@@ -7,3 +7,13 @@ item {
     name: "cut"
     id: 2
 }
+
+item {
+    name: "puncture"
+    id: 3
+}
+
+item {
+    name: "unclassified"
+    id: 4
+}

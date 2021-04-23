@@ -36,9 +36,9 @@ dark_fruit_colour = (low_Hue,low_Sat,low_Val)
 
 minFruitSize = 10000 * render_scale
 minAspectRatio = 0.5
-detection_threshold = 0.3
+detection_threshold = 0.8
 
-num_boxes_per_frame = 100
+num_boxes_per_frame = 20
 
 num_batch_frames = 1
 
@@ -50,6 +50,7 @@ def main():
     numFrames = len(frames)
     size = (frames[0].shape[1], frames[0].shape[0])
     category_index = label_map_util.create_category_index_from_labelmap(labelmap_path, use_display_name=True)
+    print(category_index)
     clahe = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(4,4))
 
     label = ['blemish']
@@ -89,7 +90,7 @@ def main():
         boundingBoxes = []
 
         for contour in contours:
-            contour = cv2.approxPolyDP(contour,0.004*cv2.arcLength(contour,True),True)
+            #contour = cv2.approxPolyDP(contour,0.004*cv2.arcLength(contour,True),True)
             area = cv2.contourArea(contour, False) #get contouring area to cull bad contours
 
             if (area < minFruitSize):
@@ -135,10 +136,10 @@ def main():
         start_time = time.time()
         output_response = query_serving(frame_images, stub)
         print("Fps: " + str(1.0 / (time.time() - start_time) * num_batch_frames))
-        frame_images.clear()
-        batch_count = 0
+        
 
         boxes_raw = get_float_vals(output_response.outputs['detection_boxes'])
+        #print("Box length: " + str(len(boxes_raw)))
         boxes = []
         counter = 0
         one_box = []
@@ -153,38 +154,46 @@ def main():
         scores = get_float_vals(output_response.outputs['detection_scores'])
         #masked_reframed = get_float_vals(output_response.outputs['detection_masks_reframed'])
         masked_reframed = None
-        #translate coordinate system from percentage of masked image to absolute full image
-        for idx, pos in enumerate(boxes): 
-            current_fruit_image = int(idx / num_boxes_per_frame) 
-            bbox = boundingBoxes[current_fruit_image]
-            ymin = pos[0] * bbox[3] + bbox[1]
-            ymax = pos[2] * bbox[3] + bbox[1]
-            xmin = pos[1] * bbox[2] + bbox[0]
-            xmax = pos[3] * bbox[2] + bbox[0]
-            boxes[idx] = [ymin, xmin, ymax, xmax]
 
-        boxes,scores = cull_below_threshold(boxes, scores, detection_threshold)
-        boxes = np.array(boxes)
-        scores = np.array(scores)
-        #boxes, scores = non_max_suppression_fast(boxes, scores, 0.2)
-        boxes = np.array(boxes)
-        scores = np.array(scores)
+        #separate receives values into different fruits
+        all_fruit_data = (list(chunks(boxes, num_boxes_per_frame)),
+                        list(chunks(classes, num_boxes_per_frame)), list(chunks(scores, num_boxes_per_frame)))
 
-        vis_util.visualize_boxes_and_labels_on_image_array(
-        roiFrame,
-        boxes,
-        np.array(classes, dtype=np.uint8),
-        scores,
-        category_index,
-        instance_masks=masked_reframed,
-        use_normalized_coordinates=False,
-        line_thickness=3,
-        min_score_thresh=detection_threshold)
+        for idx, pos in enumerate(all_fruit_data[0]): #iterate through each fruit on screen
+            b,s,c = cull_below_threshold(all_fruit_data[0][idx], all_fruit_data[2][idx], all_fruit_data[1][idx], detection_threshold)
+            for defectidx,defectpos in enumerate(b):
+                bbox = boundingBoxes[idx]
+                ymin = defectpos[0] * bbox[3] + bbox[1]
+                ymax = defectpos[2] * bbox[3] + bbox[1]
+                xmin = defectpos[1] * bbox[2] + bbox[0]
+                xmax = defectpos[3] * bbox[2] + bbox[0]
+
+                b[defectidx] = [ymin, xmin, ymax, xmax]
+
+            b,s,c = non_max_suppression_fast(np.array(b),np.array(s),np.array(c), 0.6)
+            vis_util.visualize_boxes_and_labels_on_image_array(
+            roiFrame,
+            np.array(b),
+            np.array(c, dtype=np.uint8),
+            np.array(s),
+            category_index,
+            instance_masks=masked_reframed,
+            use_normalized_coordinates=False,
+            line_thickness=3,
+            min_score_thresh=detection_threshold)
+
+        frame_images.clear()
+        batch_count = 0
 
         if (save_video == True):
             out_vid.write(roiFrame)
     if(save_video == True):
         out_vid.release()
+
+def chunks(lst, n):
+    """Yield successive n-sized chunks from lst."""
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
 
 def get_float_vals(result):
     return list(result.float_val)
@@ -203,19 +212,21 @@ def query_serving(maskedImageList, stub):
     result = stub.Predict(grpc_request, 5)  # 10 secs timeout
     return result
 
-def cull_below_threshold(boxes, scores, thresh):
+def cull_below_threshold(boxes, scores, classes, thresh):
     new_boxes = []
     new_scores = []
+    new_classes = []
     for idx,score in enumerate(scores):
         if (score >= thresh):
             new_boxes.append(boxes[idx])
             new_scores.append(score)
-    return (new_boxes, new_scores)
+            new_classes.append(classes[idx])
+    return (new_boxes, new_scores, new_classes)
 
-def non_max_suppression_fast(boxes, scores, overlapThresh):
+def non_max_suppression_fast(boxes, scores, classes, overlapThresh):
     # if there are no boxes, return an empty list
     if len(boxes) == 0:
-        return ([],[])
+        return ([],[],[])
     # if the bounding boxes integers, convert them to floats --
     # this is important since we'll be doing a bunch of divisions
     if boxes.dtype.kind == "i":
@@ -256,7 +267,7 @@ def non_max_suppression_fast(boxes, scores, overlapThresh):
             np.where(overlap > overlapThresh)[0])))
     # return only the bounding boxes that were picked using the
     # integer data type
-    return (boxes[pick].astype("int"), scores[pick].astype("float"))
+    return (boxes[pick].astype("int"), scores[pick].astype("float"), classes[pick].astype("int"))
 
 if __name__ == "__main__":
     main()
