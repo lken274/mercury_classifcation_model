@@ -2,6 +2,7 @@ import os
 import glob
 import pandas as pd
 import xml.etree.ElementTree as ET
+import random
 
 
 def xml_to_csv(path):
@@ -34,12 +35,18 @@ def xml_to_csv(path):
 
 
 def main():
-    datasets = ['train', 'dev', 'test']
-    for ds in datasets:
-        image_path = os.path.join(os.getcwd(), ds, 'annotations')
-        xml_df = xml_to_csv(image_path)
-        xml_df.to_csv('labels_{}.csv'.format(ds), index=None)
-        print('Successfully converted xml to csv.')
+    image_path = os.path.join(os.getcwd(), 'dataset/images/annotations')
+    xml_df = xml_to_csv(image_path)
+    #split into 98% train, 2% test
+    split_index = int(len(xml_df) * 0.98)
+
+    xml_train = xml_df[0:split_index]
+    xml_test = xml_df[split_index:]
+    xml_train.to_csv('labels_train.csv', index=None)
+    xml_test.to_csv('labels_test.csv', index=None)
+    
+    print('Successfully converted xml to csv.')
 
 
 main()
+

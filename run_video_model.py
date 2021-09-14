@@ -19,11 +19,11 @@ import grpc
 
 video_dir = '/home/logan/Desktop/tf_models/blemish_detector/evaluation_videos/VIS_fresh_cuts_Gold_05/*.jpg'
 model_dir = 'inference_graph/saved_model/resnet101/1/'
-save_name = "demo_output/VIS_fresh_cuts_Gold_05.avi"
+save_name = "demo_output/VIS_old_new_punctures_01.avi"
 labelmap_path = 'dataset/labelmap.pbtxt'
 grayscale = False
-save_video = True
-show_mask = False
+save_video = False
+show_mask = True
 
 render_scale = 0.5 #resolution rescaling during edge detection to improve performance
 skip_frames = 0 #start at a later point in the video so we aren't waiting for fruit
@@ -36,7 +36,7 @@ dark_fruit_colour = (low_Hue,low_Sat,low_Val)
 
 minFruitSize = 10000 * render_scale
 minAspectRatio = 0.5
-detection_threshold = 0.75
+detection_threshold = 0.65
 nonmax_sigma = 0.1
 
 num_boxes_per_frame = 40
@@ -211,6 +211,7 @@ def query_serving(maskedImageList, stub):
     
     for image in maskedImageList:
         buffer = cv2.imencode('.png', image)[1].tostring()
+        print("appending size " + str(len(buffer)))
         image_data.append(buffer)
     grpc_request.inputs["input_tensor"].CopyFrom(
     tf.make_tensor_proto(image_data, dtype=tf.dtypes.string, shape=[len(image_data)]))
