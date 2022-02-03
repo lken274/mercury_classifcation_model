@@ -14,6 +14,16 @@ item {
 }
 
 item {
-    name: "unclassified"
+    name: "calyx"
     id: 4
+}
+
+item {
+    name: "hayward_mark"
+    id: 5
+}
+
+item {
+    name: "stalk"
+    id: 6
 }
